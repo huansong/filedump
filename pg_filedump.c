@@ -1,9 +1,14 @@
 /*
+ * Utility for inspecting binary files of Greenplum Database, derived from
+ * pg_filedump from Red Hat. Original head follows
+ */
+/*
  * pg_filedump.c - PostgreSQL file dump utility for dumping and
  *				   formatting heap (data), index and control files.
  *
  * Copyright (c) 2002-2010 Red Hat, Inc.
  * Copyright (c) 2011-2019, PostgreSQL Global Development Group
+ * TODO: Copyright of Greenplum, Pivotal and VMWare
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,9 +25,12 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Original Author: Patrick Macdonald <patrickm@redhat.com>
+ *                  Gavin Sherry <gsherry@greenplum.com>
  */
 
 #include "pg_filedump.h"
+
+#include "gpdb.h"
 
 #include <utils/pg_crc.h>
 
@@ -30,8 +38,10 @@
 #undef Assert
 #define Assert(X)
 
+#if GP_VERSION_NUM >= 50000
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
+#endif /* GP_VERSION_NUM */
 #include "decode.h"
 
 /*
@@ -133,6 +143,7 @@ static void DumpBinaryBlock(char *buffer);
 static void
 DisplayOptions(unsigned int validOptions)
 {
+	/* FIXME: GPDB: gpdb version */
 	if (validOptions == OPT_RC_COPYRIGHT)
 		printf
 			("\nVersion %s (for %s)"
@@ -163,6 +174,10 @@ DisplayOptions(unsigned int validOptions)
 		 "  -i  Display interpreted item details\n"
 		 "  -k  Verify block checksums\n"
 		 "  -o  Do not dump old values.\n"
+#if 0
+		 /* FIXME: GPDB: retire this as -D is a better replacement */
+		 "  -p  Try and deparse heap data\n"
+#endif
 		 "  -R  Display specific block ranges within the file (Blocks are\n"
 		 "      indexed from 0)\n"
 		 "        [startblock]: block to start at\n"
@@ -174,11 +189,29 @@ DisplayOptions(unsigned int validOptions)
 		 "  -n  Force segment number to [segnumber]\n"
 		 "  -S  Force block size to [blocksize]\n"
 		 "  -x  Force interpreted formatting of block items as index items\n"
+#if 0
+		 /* FIXME: GPDB: can we remove this option? It's not used even for gpdb4 */
+		 "  -X  Data directory for the segment\n"
+#endif
 		 "  -y  Force interpreted formatting of block items as heap items\n\n"
 		 "The following options are valid for control files:\n"
 		 "  -c  Interpret the file listed as a control file\n"
 		 "  -f  Display formatted content dump along with interpretation\n"
 		 "  -S  Force block size to [blocksize]\n"
+		 "\nThe following options are valid for AppendOnly Column Oriented Table files:\n"
+		 "  -z  Interpret the file listed as a AppendOnly file\n"
+		 "  -T  Compression type (zlib, zstd, quicklz or none),\n"
+		 "      default=none if not specified.\n"
+		 "  -L  Compression level (1-4), default=0 if not specified\n"
+		 "  -M  Checksum option for AppendOnly files, by default tool considers\n"
+		 "      checksums not present\n"
+		 "  -O  Orientation of AppendOnly table (row or column),\n"
+		 "      default=row if not not specified.\n\n"
+#if 0
+		 /* FIXME: GPDB: how to use these options? */
+		 "  -B  Deparse the input block directory file.\n\n"
+		 "  -D  Disable dead tuple info while deparsing the block directory file.\n\n"
+#endif
 		 "\nReport bugs to <pgsql-bugs@postgresql.org>\n");
 }
 
@@ -418,6 +451,128 @@ ConsumeOptions(int numOptions, char **options)
 				break;
 			}
 		}
+		else if ((optionStringLength == 2)
+				 && (strcmp(optionString, "-T") == 0))
+		{
+			/* Only accept the compressType option once */
+			if (rc == OPT_RC_DUPLICATE)
+				break;
+
+			/* The token immediately following -T is the compressType string */
+			if (x >= (numOptions - 2))
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Missing compressType identifier.\n");
+				break;
+			}
+
+			/* Next option encountered must be forced compressType string */
+			optionString = options[++x];
+			if (strcmp(optionString, "none") == 0)
+			{
+				GPDB_SET_COMPRESS_TYPE(gpdbOptions, GPDB_COMPRESS_TYPE_NONE);
+			}
+#ifdef ENABLE_ZLIB
+			else if (strcmp(optionString, "zlib") == 0)
+			{
+				GPDB_SET_COMPRESS_TYPE(gpdbOptions, GPDB_COMPRESS_TYPE_ZLIB);
+			}
+#endif /* ENABLE_ZLIB */
+#ifdef ENABLE_QUICKLZ
+			else if (strcmp(optionString, "quicklz") == 0)
+			{
+				GPDB_SET_COMPRESS_TYPE(gpdbOptions, GPDB_COMPRESS_TYPE_QUICKLZ);
+			}
+#endif /* ENABLE_QUICKLZ */
+#ifdef ENABLE_ZSTD
+			else if (strcmp(optionString, "zstd") == 0)
+			{
+				GPDB_SET_COMPRESS_TYPE(gpdbOptions, GPDB_COMPRESS_TYPE_ZSTD);
+			}
+#endif /* ENABLE_ZSTD */
+			else if (strcmp(optionString, "zlib") == 0 ||
+					 strcmp(optionString, "quicklz") == 0 ||
+					 strcmp(optionString, "zstd") == 0)
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: compressType <%s> is not supported in current build.\n",
+					   optionString);
+				break;
+			}
+			else
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Invalid compressType requested <%s>.\n",
+					   optionString);
+				break;
+			}
+		}
+		else if ((optionStringLength == 2)
+				 && (strcmp(optionString, "-L") == 0))
+		{
+			int			localCompressLevel;
+
+			/* Only accept the compressLevel option once */
+			if (rc == OPT_RC_DUPLICATE)
+				break;
+
+			/* The token immediately following -L is the compressLevel */
+			if (x >= (numOptions - 2))
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Missing compressLevel identifier.\n");
+				break;
+			}
+
+			/* Next option encountered must be compressLevel */
+			optionString = options[++x];
+			localCompressLevel = GetOptionValue(optionString);
+			if (localCompressLevel > 0 &&
+				localCompressLevel <= GPDB_COMPRESS_LEVEL_MAX)
+			{
+				GPDB_SET_COMPRESS_LEVEL(gpdbOptions, localCompressLevel);
+			}
+			else
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Invalid compess level requested <%s>.\n",
+					   optionString);
+				break;
+			}
+		}
+		else if ((optionStringLength == 2)
+				 && (strcmp(optionString, "-O") == 0))
+		{
+			/* Only accept the orientation option once */
+			if (rc == OPT_RC_DUPLICATE)
+				break;
+
+			/* The token immediately following -O is the orientation string */
+			if (x >= (numOptions - 2))
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Missing orientation string.\n");
+				break;
+			}
+
+			/* Next option encountered must be forced orientation string */
+			optionString = options[++x];
+			if (strcmp(optionString, "row") == 0)
+			{
+				GPDB_SET_ORIENTATION(gpdbOptions, GPDB_ORIENTATION_ROW);
+			}
+			else if (strcmp(optionString, "column") == 0)
+			{
+				GPDB_SET_ORIENTATION(gpdbOptions, GPDB_ORIENTATION_COLUMN);
+			}
+			else
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Invalid orientation requested <%s>.\n",
+					   optionString);
+				break;
+			}
+		}
 		/* The last option MUST be the file name */
 		else if (x == (numOptions - 1))
 		{
@@ -552,6 +707,49 @@ ConsumeOptions(int numOptions, char **options)
 						}
 						break;
 
+#if 0
+						/* FIXME: GPDB: retire -p */
+					case 'p':
+						SET_OPTION(gpdbOptions, GPDB_DEPARSE_HEAP, 'p');
+						if (itemOptions & ITEM_INDEX)
+						{
+							rc = OPT_RC_INVALID;
+							printf("Error: Options <p> and <x> are "
+								   "mutually exclusive.\n");
+						}
+						break;
+#endif
+
+					case 'M':
+						SET_OPTION(gpdbOptions, GPDB_HAS_CHECKSUM, 'M');
+						break;
+
+					case 'z':
+						SET_OPTION(gpdbOptions, GPDB_APPEND_ONLY, 'z');
+						break;
+
+#if 0
+						/* FIXME: GPDB: how to use -D and -B? */
+						/*
+						 * Do not interpret the data. Format
+						 * to hex and ascii.
+						 */
+					case 'B':
+						SET_OPTION(gpdbOptions, GPDB_BLOCK_DIRECTORY_FILE, 'B');
+						SET_OPTION(gpdbOptions, GPDB_DEPARSE_HEAP, 'p');
+						SET_OPTION(itemOptions, ITEM_DETAIL, 'i');
+						if (itemOptions & ITEM_INDEX)
+						{
+							rc = OPT_RC_INVALID;
+							printf("Error: Options <p> and <x> are mutually exclusive.\n");
+						}
+						break;
+
+					case 'D':
+						SET_OPTION(gpdbOptions, GPDB_DISABLE_DEAD_TUPLE, 'D');
+						break;
+#endif
+
 					default:
 						rc = OPT_RC_INVALID;
 						printf("Error: Unknown option <%c>.\n", optionString[y]);
@@ -564,6 +762,16 @@ ConsumeOptions(int numOptions, char **options)
 			}
 		}
 	}
+
+#if 0
+	/* FIXME: GPDB: how to use -D and -B? */
+	if ((gpdbOptions & GPDB_DISABLE_DEAD_TUPLE) &&
+		!(gpdbOptions & GPDB_BLOCK_DIRECTORY_FILE))
+	{
+		printf("-D option should be used with -B\n");
+		exitCode = 1;
+	}
+#endif
 
 	if (rc == OPT_RC_DUPLICATE)
 	{
@@ -593,6 +801,25 @@ ConsumeOptions(int numOptions, char **options)
 				controlOptions |=
 					(blockOptions & (BLOCK_FORMAT | BLOCK_FORCED));
 				blockOptions = itemOptions = 0;
+			}
+		}
+		/* The user has requested a appendOnly Column oriented file dump */
+		/* -M, -T and -L  are valid... turn off all other formatting */
+		else if (gpdbOptions & GPDB_APPEND_ONLY)
+		{
+#if 0
+			/* FIXME: GPDB: some options are moved to gpdbOptions */
+			if ((itemOptions & ~ITEM_CHECKSUM) || blockOptions)
+			{
+				rc = OPT_RC_INVALID;
+				printf("Error: Invalid options used for Append Only Column Oriented File dump.\n"
+					   "       Only <MTL> can be used with <z> option.\n");
+			}
+			else
+#endif
+			{
+				blockOptions &= BLOCK_CHECKSUMS;
+				itemOptions = 0;
 			}
 		}
 		/* The user has requested a binary block dump... only -R and -f
@@ -693,8 +920,10 @@ GetSpecialSectionType(char *buffer, Page page)
 			rc = SPEC_SECT_ERROR_BOUNDARY;
 		else
 		{
+#if GP_VERSION_NUM >= 50000
 			/* we may need to examine last 2 bytes of page to identify index */
 			uint16	   *ptype = (uint16 *) (buffer + blockSize - sizeof(uint16));
+#endif /* GP_VERSION_NUM */
 
 			specialSize = blockSize - specialOffset;
 
@@ -713,17 +942,20 @@ GetSpecialSectionType(char *buffer, Page page)
 					specialValue = *((int *) (buffer + specialOffset));
 					if (specialValue == SEQUENCE_MAGIC)
 						rc = SPEC_SECT_SEQUENCE;
+#if GP_VERSION_NUM >= 60000
 					else if (specialSize == MAXALIGN(sizeof(SpGistPageOpaqueData)) &&
 							 *ptype == SPGIST_PAGE_ID)
 						rc = SPEC_SECT_INDEX_SPGIST;
 					else if (specialSize == MAXALIGN(sizeof(GinPageOpaqueData)))
 						rc = SPEC_SECT_INDEX_GIN;
+#endif /* GP_VERSION_NUM */
 					else
 						rc = SPEC_SECT_ERROR_UNKNOWN;
 				}
 				else
 					rc = SPEC_SECT_ERROR_UNKNOWN;
 			}
+#if GP_VERSION_NUM >= 60000
 			/* SP-GiST and GIN have same size special section, so check
 			 * the page ID bytes first. */
 			else if (specialSize == MAXALIGN(sizeof(SpGistPageOpaqueData)) &&
@@ -732,6 +964,8 @@ GetSpecialSectionType(char *buffer, Page page)
 				rc = SPEC_SECT_INDEX_SPGIST;
 			else if (specialSize == MAXALIGN(sizeof(GinPageOpaqueData)))
 				rc = SPEC_SECT_INDEX_GIN;
+#endif /* GP_VERSION_NUM */
+#if GP_VERSION_NUM >= 50000
 			else if (specialSize > 2 && bytesToFormat == blockSize)
 			{
 				/* As of 8.3, BTree, Hash, and GIST all have the same size
@@ -749,6 +983,25 @@ GetSpecialSectionType(char *buffer, Page page)
 				else
 					rc = SPEC_SECT_ERROR_UNKNOWN;
 			}
+#else /* GP_VERSION_NUM */
+			else if (specialSize == MAXALIGN (sizeof (HashPageOpaqueData)))
+			{
+				/*
+				 * As of 7.4, BTree and Hash pages have the same size special
+				 * section.  Check for HASHO_FILL to detect if it's hash.
+				 *
+				 * As of 8.2, it could be GIST, too ... but there seems no
+				 * good way to tell GIST from BTree :-(  Also, HASHO_FILL is
+				 * not reliable anymore, it could match cycleid by chance.
+				 * Need to try to get some upstream changes to make this better.
+				 */
+				HashPageOpaque hpo = (HashPageOpaque) (buffer + specialOffset);
+				if (hpo->hasho_filler == HASHO_FILL)
+					rc = SPEC_SECT_INDEX_HASH;
+				else
+					rc = SPEC_SECT_INDEX_BTREE;
+			}
+#endif /* GP_VERSION_NUM */
 			else
 				rc = SPEC_SECT_ERROR_UNKNOWN;
 		}
@@ -772,9 +1025,15 @@ IsBtreeMetaPage(Page page)
 		(BTPageOpaque) ((char *) page + pageHeader->pd_special);
 
 		/* Must check the cycleid to be sure it's really btree. */
+#if GP_VERSION_NUM >= 50000
 		if ((btpo->btpo_cycleid <= MAX_BT_CYCLE_ID) &&
 			(btpo->btpo_flags & BTP_META))
 			return true;
+#else /* GP_VERSION_NUM */
+		if ((((HashPageOpaque) (btpo))->hasho_filler != HASHO_FILL) &&
+			(btpo->btpo_flags & BTP_META))
+			return true;
+#endif /* GP_VERSION_NUM */
 	}
 	return false;
 }
@@ -798,6 +1057,7 @@ CreateDumpFileHeader(int numOptions, char **options)
 			strcat(optionBuffer, " ");
 	}
 
+	/* FIXME: GPDB: show gpdb version */
 	printf
 		("\n*******************************************************************\n"
 		 "* PostgreSQL File/Block Formatted Dump Utility\n"
@@ -829,7 +1089,11 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 	}
 	else
 	{
+#if GP_VERSION_NUM >= 60000
 		XLogRecPtr	pageLSN = PageGetLSN(page);
+#else /* GP_VERSION_NUM */
+		uint64		pageLSN = PageGetLSN_(page);
+#endif /* GP_VERSION_NUM */
 		int			maxOffset = PageGetMaxOffsetNumber(page);
 		char		flagString[100];
 
@@ -854,10 +1118,14 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 		flagString[0] = '\0';
 		if (pageHeader->pd_flags & PD_HAS_FREE_LINES)
 			strcat(flagString, "HAS_FREE_LINES|");
+#if GP_VERSION_NUM >= 50000
 		if (pageHeader->pd_flags & PD_PAGE_FULL)
 			strcat(flagString, "PAGE_FULL|");
+#endif /* GP_VERSION_NUM */
+#if GP_VERSION_NUM >= 60000
 		if (pageHeader->pd_flags & PD_ALL_VISIBLE)
 			strcat(flagString, "ALL_VISIBLE|");
+#endif /* GP_VERSION_NUM */
 		if (strlen(flagString))
 			flagString[strlen(flagString) - 1] = '\0';
 
@@ -874,9 +1142,14 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 					pageHeader->pd_special, pageHeader->pd_special);
 			printf("%s Items: %4d                      Free Space: %4u\n",
 					indent, maxOffset, pageHeader->pd_upper - pageHeader->pd_lower);
+#if GP_VERSION_NUM >= 50000
 			printf("%s Checksum: 0x%04x  Prune XID: 0x%08x  Flags: 0x%04x (%s)\n",
 					indent, pageHeader->pd_checksum, pageHeader->pd_prune_xid,
 					pageHeader->pd_flags, flagString);
+#else /* GP_VERSION_NUM */
+			printf("%s Flags: 0x%04x (%s)\n",
+					indent, pageHeader->pd_flags, flagString);
+#endif /* GP_VERSION_NUM */
 			printf("%s Length (including item array): %u\n\n",
 					indent, headerBytes);
 		}
@@ -915,6 +1188,7 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 			exitCode = 1;
 		}
 
+#if GP_VERSION_NUM >= 50000
 		if (blockOptions & BLOCK_CHECKSUMS)
 		{
 			uint32		delta = (segmentSize / blockSize) * segmentNumber;
@@ -927,6 +1201,7 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 				exitCode = 1;
 			}
 		}
+#endif /* GP_VERSION_NUM */
 	}
 
 	/* If we have reached the end of file while interpreting the header, let
@@ -1014,6 +1289,7 @@ FormatItemBlock(char *buffer,
 				case SPEC_SECT_INDEX_GIN:
 					formatAs = ITEM_INDEX;
 					break;
+#if GP_VERSION_NUM >= 60000
 				case SPEC_SECT_INDEX_SPGIST:
 					{
 						SpGistPageOpaque spgpo =
@@ -1026,6 +1302,7 @@ FormatItemBlock(char *buffer,
 							formatAs = ITEM_SPG_INNER;
 					}
 					break;
+#endif /* GP_VERSION_NUM */
 				default:
 					formatAs = ITEM_HEAP;
 					break;
@@ -1043,12 +1320,21 @@ FormatItemBlock(char *buffer,
 				case LP_UNUSED:
 					strcpy(textFlags, "UNUSED");
 					break;
+#if GP_VERSION_NUM >= 50000
 				case LP_NORMAL:
 					strcpy(textFlags, "NORMAL");
 					break;
 				case LP_REDIRECT:
 					strcpy(textFlags, "REDIRECT");
 					break;
+#else /* GP_VERSION_NUM */
+				case LP_USED:
+					strcpy(textFlags, "USED");
+					break;
+				case LP_DELETE:
+					strcpy(textFlags, "DELETE");
+					break;
+#endif /* GP_VERSION_NUM */
 				case LP_DEAD:
 					strcpy(textFlags, "DEAD");
 					break;
@@ -1119,7 +1405,11 @@ FormatItemBlock(char *buffer,
 					if (*toastRead >= toastExternalSize)
 						break;
 				}
+#if GP_VERSION_NUM >= 50000
 				else if ((blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL))
+#else /* GP_VERSION_NUM */
+				else if ((blockOptions & BLOCK_DECODE) && (itemFlags == LP_USED))
+#endif /* GP_VERSION_NUM */
 				{
 					/* Decode tuple data */
 					FormatDecode(&buffer[itemOffset], itemSize);
@@ -1138,12 +1428,14 @@ static void
 FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 		   unsigned int formatAs)
 {
+#if GP_VERSION_NUM >= 60000
 	static const char *const spgist_tupstates[4] = {
 		"LIVE",
 		"REDIRECT",
 		"DEAD",
 		"PLACEHOLDER"
 	};
+#endif /* GP_VERSION_NUM */
 
 	if (formatAs == ITEM_INDEX)
 	{
@@ -1177,6 +1469,7 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 			}
 		}
 	}
+#if GP_VERSION_NUM >= 60000
 	else if (formatAs == ITEM_SPG_INNER)
 	{
 		/* It is an SpGistInnerTuple item, so dump the index header */
@@ -1271,6 +1564,7 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 			}
 		}
 	}
+#endif /* GP_VERSION_NUM */
 	else
 	{
 		/* It is a HeapTuple item, so dump the heap header */
@@ -1307,6 +1601,15 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 			localHoff = htup->t_hoff;
 			localBitOffset = offsetof(HeapTupleHeaderData, t_bits);
 
+#if 0
+			/* FIXME: GPDB: how to use -D and -B? */
+			if ((gpdbOptions & GPDB_BLOCK_DIRECTORY_FILE) &&
+				(gpdbOptions & GPDB_DISABLE_DEAD_TUPLE) &&
+				HeapTupleHeaderGetXmax(htup) > 0 &&
+				(infoMask & HEAP_XMAX_COMMITTED))
+				return;
+#endif
+
 			printf("  XMIN: %u  XMAX: %u  CID|XVAC: %u",
 				   HeapTupleHeaderGetXmin(htup),
 				   HeapTupleHeaderGetRawXmax(htup),
@@ -1338,14 +1641,18 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 			if (infoMask & HEAP_HASOID)
 				strcat(flagString, "HASOID|");
 #endif
+#if GP_VERSION_NUM >= 60000
 			if (infoMask & HEAP_XMAX_KEYSHR_LOCK)
 				strcat(flagString, "XMAX_KEYSHR_LOCK|");
+#endif /* GP_VERSION_NUM */
 			if (infoMask & HEAP_COMBOCID)
 				strcat(flagString, "COMBOCID|");
 			if (infoMask & HEAP_XMAX_EXCL_LOCK)
 				strcat(flagString, "XMAX_EXCL_LOCK|");
+#if GP_VERSION_NUM >= 60000
 			if (infoMask & HEAP_XMAX_LOCK_ONLY)
 				strcat(flagString, "XMAX_LOCK_ONLY|");
+#endif /* GP_VERSION_NUM */
 			if (infoMask & HEAP_XMIN_COMMITTED)
 				strcat(flagString, "XMIN_COMMITTED|");
 			if (infoMask & HEAP_XMIN_INVALID)
@@ -1363,17 +1670,35 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 			if (infoMask & HEAP_MOVED_IN)
 				strcat(flagString, "MOVED_IN|");
 
+#if GP_VERSION_NUM >= 60000
 			if (infoMask2 & HEAP_KEYS_UPDATED)
 				strcat(flagString, "KEYS_UPDATED|");
+#endif /* GP_VERSION_NUM */
+#if GP_VERSION_NUM >= 50000
 			if (infoMask2 & HEAP_HOT_UPDATED)
 				strcat(flagString, "HOT_UPDATED|");
 			if (infoMask2 & HEAP_ONLY_TUPLE)
 				strcat(flagString, "HEAP_ONLY|");
+#endif /* GP_VERSION_NUM */
 
 			if (strlen(flagString))
 				flagString[strlen(flagString) - 1] = '\0';
 
 			printf("  infomask: 0x%04x (%s) \n", infoMask, flagString);
+
+#if 0
+			/*
+			 * FIXME: GPDB: retire -p, but we should add gpdb specific
+			 * types to decode.c
+			 */
+			if (gpdbOptions & GPDB_DEPARSE_HEAP)
+			{
+				/*
+				 * The original looong deparsing logic is removed, can be found
+				 * in the gp_filedump for gpdb4
+				 */
+			}
+#endif
 
 			/* As t_bits is a variable length array, determine the length of
 			 * the header proper */
@@ -1462,8 +1787,10 @@ FormatSpecial(char *buffer)
 					strcat(flagString, "SPLITEND|");
 				if (btreeSection->btpo_flags & BTP_HAS_GARBAGE)
 					strcat(flagString, "HASGARBAGE|");
+#if GP_VERSION_NUM >= 60000
 				if (btreeSection->btpo_flags & BTP_INCOMPLETE_SPLIT)
 					strcat(flagString, "INCOMPLETESPLIT|");
+#endif /* GP_VERSION_NUM */
 				if (strlen(flagString))
 					flagString[strlen(flagString) - 1] = '\0';
 
@@ -1517,8 +1844,10 @@ FormatSpecial(char *buffer)
 					strcat(flagString, "DELETED|");
 				if (gistSection->flags & F_TUPLES_DELETED)
 					strcat(flagString, "TUPLES_DELETED|");
+#if GP_VERSION_NUM >= 60000
 				if (gistSection->flags & F_FOLLOW_RIGHT)
 					strcat(flagString, "FOLLOW_RIGHT|");
+#endif /* GP_VERSION_NUM */
 				if (strlen(flagString))
 					flagString[strlen(flagString) - 1] = '\0';
 				printf(" GIST Index Section:\n"
@@ -1531,6 +1860,7 @@ FormatSpecial(char *buffer)
 			}
 			break;
 
+#if GP_VERSION_NUM >= 60000
 			/* GIN index section */
 		case SPEC_SECT_INDEX_GIN:
 			{
@@ -1587,6 +1917,7 @@ FormatSpecial(char *buffer)
 					   spgistSection->nPlaceholder);
 			}
 			break;
+#endif /* GP_VERSION_NUM */
 
 			/* No idea what type of special section this is */
 		default:
@@ -1628,6 +1959,23 @@ FormatBlock(unsigned int blockOptions,
 
 	pageOffset = blockSize * currentBlock;
 	specialType = GetSpecialSectionType(buffer, page);
+
+#if 0
+	/* FIXME: GPDB: why do we need this? */
+	if (blockOptions & BLOCK_CHECKSUMS)
+	{
+		if (bytesToFormat >= offsetof(PageHeaderData, pd_linp[0]))
+		{
+			fixupItemBlock(page, blockSize, bytesToFormat);
+//			FormatBinary(bytesToFormat, 0);
+			DumpBinaryBlock();
+		}
+		else
+			FormatHeader(page);
+
+		return;
+	}
+#endif
 
 	if (!isToast || verbose)
 		printf("\n%sBlock %4u **%s***************************************\n",
@@ -1712,18 +2060,33 @@ FormatControl(char *buffer)
 			case DB_SHUTDOWNED:
 				dbState = "SHUTDOWNED";
 				break;
+#if GP_VERSION_NUM >= 60000
 			case DB_SHUTDOWNED_IN_RECOVERY:
 				dbState = "SHUTDOWNED_IN_RECOVERY";
 				break;
+#endif /* GP_VERSION_NUM */
 			case DB_SHUTDOWNING:
 				dbState = "SHUTDOWNING";
 				break;
 			case DB_IN_CRASH_RECOVERY:
 				dbState = "IN CRASH RECOVERY";
 				break;
+#if GP_VERSION_NUM >= 60000
 			case DB_IN_ARCHIVE_RECOVERY:
 				dbState = "IN ARCHIVE RECOVERY";
 				break;
+#endif /* GP_VERSION_NUM */
+#if GP_VERSION_NUM < 50000
+			case DB_IN_STANDBY_MODE:
+				dbState = "IN STANDBY MODE";
+				break;
+			case DB_IN_STANDBY_PROMOTED:
+				dbState = "IN STANDBY MODE (PROMOTED)";
+				break;
+			case DB_IN_STANDBY_NEW_TLI_SET:
+				dbState = "IN STANDBY MODE (NEW TLI SET)";
+				break;
+#endif /* GP_VERSION_NUM */
 			case DB_IN_PRODUCTION:
 				dbState = "IN PRODUCTION";
 				break;
@@ -1747,13 +2110,21 @@ FormatControl(char *buffer)
 			   "   Previous Checkpoint Record: Log File (%u) Offset (0x%08x)\n"
 #endif
 			   "  Last Checkpoint Record Redo: Log File (%u) Offset (0x%08x)\n"
-			   "             |-    TimeLineID: %u\n"
-			   "             |-      Next XID: %u/%u\n"
-			   "             |-      Next OID: %u\n"
-			   "             |-    Next Multi: %u\n"
-			   "             |- Next MultiOff: %u\n"
-			   "             |-          Time: %s"
+			   "          |-       TimeLineID: %u\n"
+			   "          |-         Next XID: %u/%u\n"
+			   "          |-         Next OID: %u\n"
+#if GP_VERSION_NUM >= 50000
+			   "          |- Next Relfilenode: %u\n"
+#endif /* GP_VERSION_NUM */
+			   "          |-       Next Multi: %u\n"
+			   "          |-    Next MultiOff: %u\n"
+			   "          |-             Time: %s"
 			   "       Minimum Recovery Point: Log File (%u) Offset (0x%08x)\n"
+			   "          Backup Start Record: Log File (%u) Offset (0x%08x)\n"
+#if GP_VERSION_NUM >= 60000
+			   "            Backup End Record: Log File (%u) Offset (0x%08x)\n"
+#endif /* GP_VERSION_NUM */
+			   "End-of-Backup Record Required: %s\n"
 			   "       Maximum Data Alignment: %u\n"
 			   "        Floating-Point Sample: %.7g%s\n"
 			   "          Database Block Size: %u\n"
@@ -1762,7 +2133,14 @@ FormatControl(char *buffer)
 			   "            XLOG Segment Size: %u\n"
 			   "    Maximum Identifier Length: %u\n"
 			   "           Maximum Index Keys: %u\n"
+#if GP_VERSION_NUM >= 50000
 			   "             TOAST Chunk Size: %u\n\n",
+#else /* GP_VERSION_NUM */
+			   "   Date and Time Type Storage: %s\n"
+			   "         Locale Buffer Length: %u\n"
+			   "                   lc_collate: %s\n"
+			   "                     lc_ctype: %s\n\n",
+#endif /* GP_VERSION_NUM */
 			   EQ_CRC32C(crcLocal,
 						 controlData->crc) ? "Correct" : "Not Correct",
 			   controlData->pg_control_version,
@@ -1772,11 +2150,23 @@ FormatControl(char *buffer)
 			   controlData->system_identifier,
 			   dbState,
 			   ctime(&(cd_time)),
+#if GP_VERSION_NUM >= 60000
 			   (uint32) (controlData->checkPoint >> 32), (uint32) controlData->checkPoint,
+#else /* GP_VERSION_NUM */
+			   controlData->checkPoint.xlogid, controlData->checkPoint.xrecoff,
+#endif /* GP_VERSION_NUM */
 #if PG_VERSION_NUM < 110000
+#if GP_VERSION_NUM >= 60000
 			   (uint32) (controlData->prevCheckPoint >> 32), (uint32) controlData->prevCheckPoint,
+#else /* GP_VERSION_NUM */
+			   controlData->prevCheckPoint.xlogid, controlData->prevCheckPoint.xrecoff,
+#endif /* GP_VERSION_NUM */
 #endif
+#if GP_VERSION_NUM >= 60000
 			   (uint32) (checkPoint->redo >> 32), (uint32) checkPoint->redo,
+#else /* GP_VERSION_NUM */
+			   checkPoint->redo.xlogid, checkPoint->redo.xrecoff,
+#endif /* GP_VERSION_NUM */
 			   checkPoint->ThisTimeLineID,
 #if PG_VERSION_NUM < 120000
 			   checkPoint->nextXidEpoch, checkPoint->nextXid,
@@ -1785,9 +2175,20 @@ FormatControl(char *buffer)
 			   XidFromFullTransactionId(checkPoint->nextFullXid),
 #endif
 			   checkPoint->nextOid,
+#if GP_VERSION_NUM >= 50000
+			   checkPoint->nextRelfilenode,
+#endif /* GP_VERSION_NUM */
 			   checkPoint->nextMulti, checkPoint->nextMultiOffset,
 			   ctime(&cp_time),
+#if GP_VERSION_NUM >= 60000
 			   (uint32) (controlData->minRecoveryPoint >> 32), (uint32) controlData->minRecoveryPoint,
+			   (uint32) (controlData->backupStartPoint >> 32), (uint32) controlData->backupStartPoint,
+			   (uint32) (controlData->backupEndPoint >> 32), (uint32) controlData->backupEndPoint,
+#else /* GP_VERSION_NUM */
+			   controlData->minRecoveryPoint.xlogid, controlData->minRecoveryPoint.xrecoff,
+			   controlData->backupStartPoint.xlogid, controlData->backupStartPoint.xrecoff,
+#endif /* GP_VERSION_NUM */
+			   (controlData->backupEndRequired ? "yes" : "no"),
 			   controlData->maxAlign,
 			   controlData->floatFormat,
 			   (controlData->floatFormat == FLOATFORMAT_VALUE ?
@@ -1798,7 +2199,14 @@ FormatControl(char *buffer)
 			   controlData->xlog_seg_size,
 			   controlData->nameDataLen,
 			   controlData->indexMaxKeys,
-			   controlData->toast_max_chunk_size);
+#if GP_VERSION_NUM >= 50000
+			   controlData->toast_max_chunk_size
+#else /* GP_VERSION_NUM */
+			   (controlData->enableIntTimes ? "64 bit Integers" : "Floating Point"),
+			   controlData->localeBuflen, controlData->lc_collate,
+			   controlData->lc_ctype
+#endif /* GP_VERSION_NUM */
+			  );
 	}
 	else
 	{
@@ -2013,6 +2421,15 @@ main(int argv, char **argc)
 		DisplayOptions(validOptions);
 	else
 	{
+#if 0
+		/* FIXME: GPDB: retire -p, but why do we need below hack? */
+		if (gpdbOptions & GPDB_DEPARSE_HEAP)
+		{
+			file_set_dirs(fileName);
+			build_tupdesc();
+		}
+#endif
+
 		/* Don't dump the header if we're dumping binary pages */
 		if (!(blockOptions & BLOCK_BINARY))
 			CreateDumpFileHeader(argv, argc);
@@ -2024,20 +2441,34 @@ main(int argv, char **argc)
 			if (!(controlOptions & CONTROL_FORCED))
 				blockSize = sizeof(ControlFileData);
 		}
+		else if (gpdbOptions & GPDB_APPEND_ONLY)
+		{
+			/* We grow this based on header read, dynamically */
+			blockSize = DEFAULT_APPENDONLY_BLOCK_SIZE;
+		}
 		else if (!(blockOptions & BLOCK_FORCED))
 			blockSize = GetBlockSize(fp);
 
-		exitCode = DumpFileContents(blockOptions,
-				controlOptions,
-				fp,
-				blockSize,
-				blockStart,
-				blockEnd,
-				false /* is toast realtion */,
-				0,    /* no toast Oid */
-				0,    /* no toast external size */
-				NULL  /* no out toast value */
-				);
+		if (gpdbOptions & GPDB_APPEND_ONLY)
+		{
+			/* FIXME: GPDB: also pass other options, such as blockStart */
+			/* FIXME: GPDP: possible to decode tuples for AO files? */
+			exitCode = DumpAppendOnlyFileContents(fp, blockSize);
+		}
+		else
+		{
+			exitCode = DumpFileContents(blockOptions,
+					controlOptions,
+					fp,
+					blockSize,
+					blockStart,
+					blockEnd,
+					false /* is toast realtion */,
+					0,    /* no toast Oid */
+					0,    /* no toast external size */
+					NULL  /* no out toast value */
+					);
+		}
 	}
 
 	if (fp)

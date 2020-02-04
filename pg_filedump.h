@@ -30,14 +30,20 @@
 #include <time.h>
 #include <ctype.h>
 
+#if GP_VERSION_NUM >= 60000
 #include "access/gin_private.h"
+#endif /* GP_VERSION_NUM */
 #include "access/gist.h"
 #include "access/hash.h"
 #include "access/htup.h"
+#if GP_VERSION_NUM >= 60000
 #include "access/htup_details.h"
+#endif /* GP_VERSION_NUM */
 #include "access/itup.h"
 #include "access/nbtree.h"
+#if GP_VERSION_NUM >= 60000
 #include "access/spgist_private.h"
+#endif /* GP_VERSION_NUM */
 #include "catalog/pg_control.h"
 #include "storage/bufpage.h"
 

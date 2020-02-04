@@ -1,0 +1,164 @@
+GPDB_RELEASE ?= 7
+top_builddir ?= $(HOME)/src/gpdb-$(GPDB_RELEASE).git
+
+PROGRAM = pg_filedump
+OBJS	= decode.o pg_filedump.o stringinfo.o
+
+DOCS = README.pg_filedump
+
+LINKDIR := links
+
+PKG_CONFIG ?= pkg-config --define-prefix --silence-errors
+
+# auto detect zlib if not explicitly specified
+ifndef ENABLE_ZLIB
+	ENABLE_ZLIB = $(shell $(PKG_CONFIG) --exists zlib && echo y || echo n)
+endif # ENABLE_ZLIB
+# try to enable zlib
+ifeq ($(ENABLE_ZLIB),y)
+	ifeq ($(shell $(PKG_CONFIG) --libs zlib),)
+$(error cannot find zlib)
+	endif
+
+	PG_CPPFLAGS += -D ENABLE_ZLIB
+	PG_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags zlib)
+	PG_LIBS += $(shell $(PKG_CONFIG) --libs zlib)
+endif # ENABLE_ZLIB
+
+# auto detect libzstd if not explicitly specified
+ifndef ENABLE_ZSTD
+	ENABLE_ZSTD = $(shell $(PKG_CONFIG) --exists libzstd && echo y || echo n)
+endif # ENABLE_ZSTD
+# try to enable libzstd
+ifeq ($(ENABLE_ZSTD),y)
+	ifeq ($(shell $(PKG_CONFIG) --libs libzstd),)
+$(error cannot find libzstd)
+	endif
+
+	PG_CPPFLAGS += -D ENABLE_ZSTD
+	PG_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags libzstd)
+	PG_LIBS += $(shell $(PKG_CONFIG) --libs libzstd)
+endif # ENABLE_ZSTD
+
+# auto detect quicklz if not explicitly specified
+ifndef ENABLE_QUICKLZ
+	ENABLE_QUICKLZ = $(shell $(PKG_CONFIG) --exists quicklz && echo y || echo n)
+
+	# do not give up if quicklz package is not found, try to build from
+	# sources, but this only works for a non-PGXS build
+	ifndef USE_PGXS
+		ifeq ($(ENABLE_QUICKLZ),n)
+			ifneq ($(wildcard \
+						$(top_builddir)/src/backend/storage/file/quicklz1.c \
+						$(top_builddir)/gpAux/addon/src/backend/quicklz1.c),)
+				ENABLE_QUICKLZ = y
+			endif
+		endif
+	endif # USE_PGXS
+endif # ENABLE_QUICKLZ
+ifeq ($(ENABLE_QUICKLZ),y)
+	PG_CPPFLAGS += -D ENABLE_QUICKLZ
+
+	ifneq ($(shell $(PKG_CONFIG) --libs quicklz),)
+		PG_CPPFLAGS += $(shell $(PKG_CONFIG) --cflags quicklz)
+		PG_LIBS += $(shell $(PKG_CONFIG) --libs quicklz)
+	else
+		PG_CPPFLAGS += -D ENABLE_QUICKLZ_LEGACY
+
+		ifdef USE_PGXS
+$(error cannot find quicklz package)
+		endif # USE_PGXS
+
+		# possible source path for for gpdb 4.3
+		ifneq ($(wildcard $(top_builddir)/src/backend/storage/file/quicklz1.c),)
+			LINKS += src/backend/storage/file/quicklz1.c
+			LINKS += src/backend/storage/file/quicklz3.c
+		else
+			# possible source path for for gpdb 5
+			ifneq ($(wildcard $(top_builddir)/gpAux/addon/src/backend/quicklz1.c),)
+				LINKS += gpAux/addon/src/backend/quicklz1.c
+				LINKS += gpAux/addon/src/backend/quicklz3.c
+			else
+$(error cannot find quicklz package or source code)
+			endif
+		endif
+	endif
+endif # ENABLE_QUICKLZ
+
+LINKS += src/backend/utils/adt/numutils.c
+LINKS += src/backend/access/common/heaptuple.c
+LINKS += src/backend/cdb/cdbappendonlystorageformat.c
+
+ifeq ($(GPDB_RELEASE),7)
+LINKS += src/backend/utils/adt/expandeddatum.c
+endif # GPDB_RELEASE
+
+LINKSRCS := $(addprefix $(LINKDIR)/,$(LINKS))
+
+OBJS += $(LINKSRCS:.c=.o)
+OBJS += gpdb.o
+OBJS += mock.o
+
+# heap has incompatible flags between gpdb 4 and later major versions
+ifeq ($(GPDB_RELEASE),4)
+	REGRESS += gpdb-4-common
+else # GPDB_RELEASE
+	REGRESS += gpdb-5-common
+	REGRESS += gpdb-6-common
+	REGRESS += gpdb-7-common
+endif # GPDB_RELEASE
+
+# pg_control has incompatible formats between gpdb major versions
+REGRESS += gpdb-$(GPDB_RELEASE)-control
+
+ifeq ($(ENABLE_ZLIB),y)
+	REGRESS += gpdb-4-zlib
+	REGRESS += gpdb-5-zlib
+	REGRESS += gpdb-6-zlib
+	REGRESS += gpdb-7-zlib
+endif # ENABLE_ZLIB
+
+ifeq ($(ENABLE_ZSTD),y)
+	REGRESS += gpdb-6-zstd
+	REGRESS += gpdb-7-zstd
+endif # ENABLE_ZSTD
+
+ifeq ($(ENABLE_QUICKLZ),y)
+	REGRESS += gpdb-4-quicklz
+	REGRESS += gpdb-5-quicklz
+	REGRESS += gpdb-6-quicklz
+	REGRESS += gpdb-7-quicklz
+endif # ENABLE_QUICKLZ
+
+ifdef USE_PGXS
+	PG_CONFIG = pg_config
+	PGXS := $(shell $(PG_CONFIG) --pgxs)
+	include $(PGXS)
+else
+	subdir ?= contrib/pg_filedump
+	top_builddir ?= ../..
+	include $(top_builddir)/src/Makefile.global
+	include $(top_srcdir)/contrib/contrib-global.mk
+endif
+
+# avoid linking against all libs that the server links against (xml, selinux, ...)
+LIBS = $(libpq_pgport)
+
+$(LINKSRCS): $(LINKDIR)/timestamp
+
+$(LINKDIR)/timestamp:
+	rm -rf $(LINKDIR)
+	mkdir -p $(dir $(LINKSRCS))
+	rm -f $(LINKSRCS)
+ifdef USE_PGXS
+	# TODO: fetch the source code from github
+endif # USE_PGXS
+	$(foreach f,$(LINKS),$(LN_S) $(top_srcdir)/$f $(LINKDIR)/$f;)
+	touch $@
+
+# the make variable EXTRA_CLEAN can be used to set extra clean, however dirs
+# cannot be correctly removed until gpdb 6, so we have to do the job manually.
+.PHONY: extra-clean
+clean: extra-clean
+extra-clean:
+	-rm -rf $(LINKDIR)
