@@ -168,6 +168,7 @@ toast_flatten_tuple_attribute(Datum value,
  * src/backend/utils/error/elog.c
  ***************************************************************************/
 
+#if PG_VERSION_NUM <= 90600
 int
 errcode_for_file_access(void)
 {
@@ -245,6 +246,65 @@ errhint(const char *fmt,...)
 	fprintf(stderr, "HINT: %s\n", fmt);
 	return 0;		/* return value does not matter */
 }
+#else /* PG_VERSION_NUM */
+void
+errcode_for_file_access(void)
+{
+}
+
+bool
+errstart(int elevel, const char *domain)
+{
+	return (elevel >= ERROR);
+}
+
+void
+errfinish(const char *filename, int lineno, const char *funcname)
+{
+	exit(1);
+}
+
+int
+errprintstack(bool printstack)
+{
+	return 0;					/* return value does not matter */
+}
+
+void
+errcode(int sqlerrcode)
+{
+}
+
+void
+errmsg(const char *fmt,...)
+{
+	fprintf(stderr, "ERROR: %s\n", fmt);
+}
+
+void
+errmsg_internal(const char *fmt,...)
+{
+	fprintf(stderr, "ERROR: %s\n", fmt);
+}
+
+void
+errdetail(const char *fmt,...)
+{
+	fprintf(stderr, "DETAIL: %s\n", fmt);
+}
+
+void
+errdetail_log(const char *fmt,...)
+{
+	fprintf(stderr, "DETAIL: %s\n", fmt);
+}
+
+void
+errhint(const char *fmt,...)
+{
+	fprintf(stderr, "HINT: %s\n", fmt);
+}
+#endif /* PG_VERSION_NUM */
 
 #if GP_VERSION_NUM < 50000
 int

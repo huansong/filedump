@@ -143,13 +143,13 @@ appendStringInfoString(StringInfo str, const char *s)
  * Append arbitrary binary data to a StringInfo, allocating more space
  * if necessary.
  */
-#ifdef GP_VERSION
+#if PG_VERSION_NUM <= 90600
 void
 appendBinaryStringInfo(StringInfo str, const void *data, int datalen)
-#else /* GP_VERSION */
+#else /* PG_VERSION_NUM */
 void
 appendBinaryStringInfo(StringInfo str, const char *data, int datalen)
-#endif /* GP_VERSION */
+#endif /* PG_VERSION_NUM */
 {
 	assert(str != NULL);
 

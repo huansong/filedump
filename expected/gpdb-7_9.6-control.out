@@ -1,10 +1,10 @@
 -- control file
-\! pg_filedump -c test/pg_control.gp7
+\! pg_filedump -c test/pg_control.gp7_9.6
 
 *******************************************************************
 * PostgreSQL File/Block Formatted Dump Utility
 *
-* File: test/pg_control.gp7
+* File: test/pg_control.gp7_9.6
 * Options used: -c
 *******************************************************************
 
