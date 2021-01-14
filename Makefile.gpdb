@@ -231,6 +231,9 @@ $(LINKDIR)/timestamp.$(GPDB_COMMIT):
 		$(GPDB_REPO)/$(GPDB_COMMIT)/$f;)
 	touch $@
 
+# add init_file
+REGRESS_OPTS = --init-file=$(srcdir)/init_file
+
 # always redownload all the files
 .PHONY: download
 download:
