@@ -68,7 +68,7 @@ DOCS = README.pg_filedump
 DOCS += README.gpdb.md
 
 LINKDIR := gpdb_$(GPDB_RELEASE)_$(PG_CONFIG_MAJOR_VERSION)
-PKG_CONFIG ?= pkg-config --define-prefix --silence-errors
+PKG_CONFIG ?= pkg-config --silence-errors
 
 # auto detect zlib if not explicitly specified
 ifndef ENABLE_ZLIB
