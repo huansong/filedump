@@ -1,0 +1,18 @@
+platform: linux
+image_resource:
+  type: docker-image
+inputs:
+  - name: filedump_src
+  - name: gpdb_src
+  - name: bin_gpdb
+params:
+  DUMP_DB: "false"
+  MAKE_DOWNLOAD_COMMAND: ""
+  MAKE_COMPILE_COMMAND: ""
+  MAKE_TEST_COMMAND: ""
+  BLDWRAP_POSTGRES_CONF_ADDONS: ""
+  TEST_OS: ""
+  CONFIGURE_FLAGS: ""
+  WITH_MIRRORS:
+run:
+  path: filedump_src/concourse/scripts/compile_test.bash
