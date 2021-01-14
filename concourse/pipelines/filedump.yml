@@ -1,0 +1,59 @@
+groups:
+- name: all
+  jobs:
+  - compile_and_test_filedump
+
+resource_types:
+- name: gcs
+  type: docker-image
+  source:
+    repository: frodenas/gcs-resource
+
+resources:
+- name: gpdb_src
+  type: git
+  source:
+    branch: 6X_STABLE
+    uri: https://github.com/greenplum-db/gpdb
+    ignore_paths:
+    - gpdb-doc/*
+    - README*
+
+- name: filedump_src
+  type: git
+  source:
+    branch: main
+    uri: https://github.com/greenplum-db/filedump
+
+- name: gpdb6-centos7-build
+  type: registry-image
+  source:
+    repository: pivotaldata/gpdb6-centos7-build
+    tag: latest
+
+- name: bin_gpdb_centos7
+  type: gcs
+  source:
+    bucket: ((gcs-bucket-intermediates))
+    json_key: ((concourse-gcs-resources-service-account-key))
+    versioned_file: 6X_STABLE_without_asserts/bin_gpdb_centos7/bin_gpdb.tar.gz
+
+jobs:
+- name: compile_and_test_filedump
+  plan:
+  - in_parallel:
+      steps:
+      - get: gpdb_src
+      - get: filedump_src
+      - get: bin_gpdb
+        resource: bin_gpdb_centos7
+      - get: gpdb6-centos7-build
+  - task: ic_filedump
+    file: filedump_src/concourse/tasks/compile_test.yml
+    image: gpdb6-centos7-build
+    params:
+      MAKE_DOWNLOAD_COMMAND: -f Makefile.gpdb download
+      MAKE_COMPILE_COMMAND: -f Makefile.gpdb install
+      MAKE_TEST_COMMAND: -f Makefile.gpdb installcheck
+      TEST_OS: centos
+      CONFIGURE_FLAGS: {{configure_flags}}
