@@ -1,3 +1,13 @@
+/*-------------------------------------------------------------------------
+ *
+ * mock.c
+ *    Mock function calls for filedump
+ *
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *-------------------------------------------------------------------------
+ */
 #include "pg_filedump.h"
 
 #include "access/tuptoaster.h"

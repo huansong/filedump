@@ -4,6 +4,8 @@
  *
  * Copyright (c) 2002-2010 Red Hat, Inc.
  * Copyright (c) 2011-2019, PostgreSQL Global Development Group
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

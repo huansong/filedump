@@ -6,3 +6,4 @@ This project is based on [PostgreSQL Filedump](https://git.postgresql.org/gitweb
 
 The original readme of PostgreSQL Filedump is included as [README.pg_filedump](README.pg_filedump)
 
+For the readme of Greenplum Filedump, please refer to [README.gpdb.md](README.gpdb.md)

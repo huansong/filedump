@@ -1,15 +1,15 @@
 /*-------------------------------------------------------------------------
  *
  * gpdb.h
- *	  TODO file description
+ *    Dump append only table
  *
  *
- * Copyright (c) 2020-Present Pivotal Software, Inc.
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
  *
  *
  *-------------------------------------------------------------------------
  */
-
 #ifndef GPDB_H
 #define GPDB_H
 

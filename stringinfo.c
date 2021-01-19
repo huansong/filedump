@@ -1,8 +1,16 @@
-/*
- * Code mostly borrowed from PostgreSQL's stringinfo.c
- * palloc replaced to malloc, etc.
+/*-------------------------------------------------------------------------
+ *
+ * stringinfo.c
+ *    Code mostly borrowed from PostgreSQL's stringinfo.c
+ *    palloc replaced to malloc, etc.		
+ *
+ *
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *
+ *-------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 #include <lib/stringinfo.h>
 #include <string.h>

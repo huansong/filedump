@@ -1,3 +1,13 @@
+/*-------------------------------------------------------------------------
+ *
+ * decode.c
+ *    Decode different kinds of data type.
+ *
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *-------------------------------------------------------------------------
+ */
 #include "postgres.h"
 #include "decode.h"
 #include "pg_filedump.h"

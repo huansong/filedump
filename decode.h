@@ -1,3 +1,13 @@
+/*-------------------------------------------------------------------------
+ *
+ * decode.h
+ *    Decode different kinds of data type.
+ *
+ * Copyright (c) 2021 VMware, Inc. or its affiliates
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *-------------------------------------------------------------------------
+ */
 #ifndef _PG_FILEDUMP_DECODE_H_
 #define _PG_FILEDUMP_DECODE_H_
 
