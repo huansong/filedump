@@ -32,6 +32,7 @@
 #include <time.h>
 #include <ctype.h>
 
+#include "access/bitmap.h"
 #if GP_VERSION_NUM >= 60000
 #include "access/gin_private.h"
 #endif /* GP_VERSION_NUM */
@@ -63,7 +64,8 @@ typedef enum blockSwitches
 	BLOCK_CHECKSUMS = 0x00000040,		/* -k: verify block checksums */
 	BLOCK_DECODE = 0x00000080,			/* -D: Try to decode tuples */
 	BLOCK_DECODE_TOAST = 0x00000100,	/* -t: Try to decode TOAST values */
-	BLOCK_IGNORE_OLD = 0x00000200		/* -o: Decode old values */
+	BLOCK_IGNORE_OLD = 0x00000200,		/* -o: Decode old values */
+	BLOCK_BITMAP = 0x00000400		/* -B: Treat block as a bitmap index page */
 } blockSwitches;
 
 /* Segment-related options */
@@ -108,6 +110,7 @@ typedef enum specialSectionTypes
 {
 	SPEC_SECT_NONE,				/* No special section on block */
 	SPEC_SECT_SEQUENCE,			/* Sequence info in special section */
+	SPEC_SECT_INDEX_BITMAP,		/* Bitmap index info in special section */
 	SPEC_SECT_INDEX_BTREE,		/* BTree index info in special section */
 	SPEC_SECT_INDEX_HASH,		/* Hash index info in special section */
 	SPEC_SECT_INDEX_GIST,		/* GIST index info in special section */

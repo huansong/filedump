@@ -190,6 +190,7 @@ DisplayOptions(unsigned int validOptions)
 		 "  -n  Force segment number to [segnumber]\n"
 		 "  -S  Force block size to [blocksize]\n"
 		 "  -x  Force interpreted formatting of block items as index items\n"
+		 "  -B  Force interpreted formatting of block items as bitmap index items\n"
 #if 0
 		 /* FIXME: GPDB: can we remove this option? It's not used even for gpdb4 */
 		 "  -X  Data directory for the segment\n"
@@ -684,6 +685,11 @@ ConsumeOptions(int numOptions, char **options)
 						verbose = true;
 						break;
 
+						/* Interpret page as bitmap index */
+					case 'B':
+						SET_OPTION(blockOptions, BLOCK_BITMAP, 'B');
+						/* Fall through */
+
 						/* Interpret items as standard index values */
 					case 'x':
 						SET_OPTION(itemOptions, ITEM_INDEX, 'x');
@@ -843,6 +849,51 @@ ConsumeOptions(int numOptions, char **options)
 	return (rc);
 }
 
+/*-------------------------------------------------------
+ * Get a user-friendly print version of a bitmap word (uint64),
+ * i.e. bytes are printed according to host endianness.
+ * e.g. 31 becomes '00 00 00 00 00 00 00 1f'.
+ * The length of the word is always 24 (including ending '\0').
+ * ------------------------------------------------------
+ */
+static char*
+GetBitmapWord(BM_HRL_WORD *word)
+{
+	char 			*wordtext;
+	char 			*ptr;
+	char 			*ret;
+	int 			off;
+
+	ptr = (char*)word;
+	wordtext = malloc(24);
+	ret = wordtext;
+	/* Be aware of endianness */
+	if (htonl(42) == 42)
+	{
+		/* Big Endian */
+		for (off = 0; off <= 7; off++)
+		{
+			if (off > 0)
+				*wordtext++ = ' ';
+			sprintf(wordtext, "%02x", *(ptr + off) & 0xff);
+			wordtext += 2;
+		}
+	}
+	else
+	{
+		/* Little Endian */
+		for (off = 7; off >= 0; off--)
+		{
+			if (off < 7)
+				*wordtext++ = ' ';
+			sprintf(wordtext, "%02x", *(ptr + off) & 0xff);
+			wordtext += 2;
+		}
+	}
+
+	return ret;
+}
+
 /* Given the index into the parameter list, convert and return the
  * current string to a number if possible */
 static int
@@ -971,8 +1022,13 @@ GetSpecialSectionType(char *buffer, Page page)
 			{
 				/* As of 8.3, BTree, Hash, and GIST all have the same size
 				 * special section, but the last two bytes of the section
-				 * can be checked to determine what's what. */
-				if (*ptype <= MAX_BT_CYCLE_ID &&
+				 * can be checked to determine what's what. 
+				 * Note that, Bitmap also has the same size but it does not
+				 * have the two bytes identifier, so we use option to force it. */
+				if (specialSize == MAXALIGN(sizeof(BMBitmapOpaqueData)) && 
+						(blockOptions & BLOCK_BITMAP))
+					rc = SPEC_SECT_INDEX_BITMAP;
+				else if (*ptype <= MAX_BT_CYCLE_ID &&
 					specialSize == MAXALIGN(sizeof(BTPageOpaqueData)))
 					rc = SPEC_SECT_INDEX_BTREE;
 				else if (*ptype == HASHO_PAGE_ID &&
@@ -1036,6 +1092,22 @@ IsBtreeMetaPage(Page page)
 			return true;
 #endif /* GP_VERSION_NUM */
 	}
+	return false;
+}
+
+/*	Check whether page is a bitmap meta page */
+static bool
+IsBitmapMetaPage(Page page)
+{
+#if GP_VERSION_NUM >= 50000
+	if (bytesToFormat == blockSize)
+	{
+		BMMetaPage metapage = (BMMetaPage) PageGetContents(page);
+
+		if (metapage->bm_magic == BITMAP_MAGIC)
+			return true;
+	}
+#endif /* GP_VERSION_NUM */
 	return false;
 }
 
@@ -1171,6 +1243,21 @@ FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
 			}
 			headerBytes += sizeof(BTMetaPageData);
 		}
+		else if (IsBitmapMetaPage(page))
+		{
+			BMMetaPage bmpMeta = (BMMetaPage) PageGetContents(page);
+
+			if (!isToast || verbose)
+			{
+				printf("%s Bitmap Meta Data: Magic (0x%08x)   Version (%u)\n",
+						indent, bmpMeta->bm_magic, bmpMeta->bm_version);
+				printf("%s                   HeapId (%u)  IndexId(%u)\n",
+						indent, bmpMeta->bm_lov_heapId, bmpMeta->bm_lov_indexId);
+				printf("%s                   LastLovPage (%u)\n\n",
+					indent, bmpMeta->bm_lov_lastpage);
+			}
+			headerBytes += sizeof(BMMetaPage);
+		}
 
 		/* Eye the contents of the header and alert the user to possible 
 		 * problems. */
@@ -1244,9 +1331,9 @@ FormatItemBlock(char *buffer,
 	int			maxOffset = PageGetMaxOffsetNumber(page);
 	char	   *indent = isToast ? "\t" : "";
 
-	/* If it's a btree meta page, the meta block is where items would normally
+	/* If it's a btree/bitmap meta page, the meta block is where items would normally
 	 * be; don't print garbage. */
-	if (IsBtreeMetaPage(page))
+	if (IsBtreeMetaPage(page) || IsBitmapMetaPage(page))
 		return;
 
 	if (!isToast || verbose)
@@ -1257,7 +1344,21 @@ FormatItemBlock(char *buffer,
 	 * through each item */
 	if (maxOffset == 0)
 	{
-		if (!isToast || verbose)
+		/* Bitmap pages are not organized as normal items, treat them specially.*/
+		if (specialType == SPEC_SECT_INDEX_BITMAP)
+		{
+			BMBitmapOpaque bm_opaque = (BMBitmapOpaque) PageGetSpecialPointer(page);
+			int i = 0;
+			for (i = 0; i < bm_opaque->bm_hrl_words_used; i++)
+			{
+				BMBitmap bitmap = (BMBitmap) PageGetContentsMaxAligned(page);
+				printf("Word %d:  \"%s\"   Compressed: %d\n", i, 
+					GetBitmapWord(&bitmap->cwords[i]),
+					IS_FILL_WORD(bitmap->hwords, i));
+			}
+			printf("\n");
+		}
+		else if (!isToast || verbose)
 			printf("%s Empty block - no items listed \n\n", indent);
 	}
 	else if ((maxOffset < 0) || (maxOffset > blockSize))
@@ -1284,6 +1385,7 @@ FormatItemBlock(char *buffer,
 		else
 			switch (specialType)
 			{
+				case SPEC_SECT_INDEX_BITMAP:
 				case SPEC_SECT_INDEX_BTREE:
 				case SPEC_SECT_INDEX_HASH:
 				case SPEC_SECT_INDEX_GIST:
@@ -1440,8 +1542,29 @@ FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex,
 
 	if (formatAs == ITEM_INDEX)
 	{
+		/* LOV page items for bitmap */
+		if (blockOptions & BLOCK_BITMAP)
+		{
+			if (numBytes != sizeof(BMLOVItemData))
+			{
+				printf("  Error: This item does not look like a bitmap index item.\n");
+				exitCode = 1;
+			}
+			else
+			{
+				BMLOVItem lovItem = (BMLOVItem) (&(buffer[startIndex]));
+				printf("  LOV head: %u   LOV tail: %u   Last tid:: %lu   Last setbit: %lu  \n"
+					"  Last complete word: \"%s\"   Last word: \"%s\" \n"
+					"  Last complete word filled: %d   Last word filled: %d\n\n",
+					lovItem->bm_lov_head, lovItem->bm_lov_tail, 
+					lovItem->bm_last_tid_location, lovItem->bm_last_setbit,
+					GetBitmapWord(&lovItem->bm_last_compword),
+					GetBitmapWord(&lovItem->bm_last_word),
+					(lovItem->lov_words_header & 2) == 2, (lovItem->lov_words_header & 1) == 1);
+			}
+		}
 		/* It is an IndexTuple item, so dump the index header */
-		if (numBytes < sizeof(ItemPointerData))
+		else if (numBytes < sizeof(ItemPointerData))
 		{
 			if (numBytes)
 			{
@@ -1767,6 +1890,20 @@ FormatSpecial(char *buffer)
 
 		case SPEC_SECT_SEQUENCE:
 			printf(" Sequence: 0x%08x\n", SEQUENCE_MAGIC);
+			break;
+
+			/* Bitmap index section */
+		case SPEC_SECT_INDEX_BITMAP:
+			{
+				BMBitmapOpaque bitmapSection = (BMBitmapOpaque) (buffer + specialOffset);
+				printf(" Bitmap Index Section:\n"
+					   "  Num of used words: %u \n"
+					   "  Tid of last bit: %lu \n"
+					   "  Next bitmap page: %u \n\n",
+					   bitmapSection->bm_hrl_words_used,
+					   bitmapSection->bm_last_tid_location,
+					   bitmapSection->bm_bitmap_next);
+			}
 			break;
 
 			/* Btree index section */

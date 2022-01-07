@@ -1,5 +1,8 @@
 -- b-tree index
-\! pg_filedump test/index.gp6
+\! pg_filedump test/index_btree.gp6
+
+-- bitmap index
+\! pg_filedump -i -B test/index_bitmap.gp6
 
 -- create table <name> (c1 int, c2 text)
 \! pg_filedump test/heap.gp6

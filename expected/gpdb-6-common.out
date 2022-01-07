@@ -1,10 +1,10 @@
 -- b-tree index
-\! pg_filedump test/index.gp6
+\! pg_filedump test/index_btree.gp6
 
 *******************************************************************
 * PostgreSQL File/Block Formatted Dump Utility
 *
-* File: test/index.gp6
+* File: test/index_btree.gp6
 * Options used: None
 *******************************************************************
 
@@ -121,6 +121,102 @@ Block    1 ********************************************************
 
 
 *** End of File Encountered. Last Block Read: 1 ***
+-- bitmap index
+\! pg_filedump -i -B test/index_bitmap.gp6
+
+*******************************************************************
+* PostgreSQL File/Block Formatted Dump Utility
+*
+* File: test/index_bitmap.gp6
+* Options used: -i -B
+*******************************************************************
+
+Block    0 ********************************************************
+<Header> -----
+ Block Offset: 0x00000000         Offsets: Lower      24 (0x0018)
+ Block: Size 32768  Version   14            Upper    32768 (0x8000)
+ LSN:  logid      1 recoff 0xc1607010      Special  32768 (0x8000)
+ Items:    0                      Free Space: 32744
+ Checksum: 0x530e  Prune XID: 0x00000000  Flags: 0x0000 ()
+ Length (including item array): 24
+
+ Bitmap Meta Data: Magic (0x4249544d)   Version (2)
+                   HeapId (24635)  IndexId(24637)
+                   LastLovPage (1)
+
+
+Block    1 ********************************************************
+<Header> -----
+ Block Offset: 0x00008000         Offsets: Lower      36 (0x0024)
+ Block: Size 32768  Version   14            Upper    32624 (0x7f70)
+ LSN:  logid      1 recoff 0xc16596b0      Special  32768 (0x8000)
+ Items:    3                      Free Space: 32588
+ Checksum: 0x49c9  Prune XID: 0x00000000  Flags: 0x0000 ()
+ Length (including item array): 36
+
+<Data> -----
+ Item   1 -- Length:   48  Offset: 32720 (0x7fd0)  Flags: NORMAL
+  LOV head: 4294967295   LOV tail: 4294967295   Last tid:: 0   Last setbit: 0  
+  Last complete word: "ff ff ff ff ff ff ff ff"   Last word: "00 00 00 00 00 00 00 00" 
+  Last complete word filled: 0   Last word filled: 0
+
+ Item   2 -- Length:   48  Offset: 32672 (0x7fa0)  Flags: NORMAL
+  LOV head: 2   LOV tail: 2   Last tid:: 65600   Last setbit: 65627  
+  Last complete word: "80 00 00 00 00 00 00 01"   Last word: "00 00 00 00 07 ff ff ff" 
+  Last complete word filled: 1   Last word filled: 0
+
+ Item   3 -- Length:   48  Offset: 32624 (0x7f70)  Flags: NORMAL
+  LOV head: 3   LOV tail: 3   Last tid:: 131200   Last setbit: 131254  
+  Last complete word: "80 00 00 00 00 00 00 02"   Last word: "00 3f ff ff ff ff ff ff" 
+  Last complete word filled: 1   Last word filled: 0
+
+
+
+Block    2 ********************************************************
+<Header> -----
+ Block Offset: 0x00010000         Offsets: Lower      24 (0x0018)
+ Block: Size 32768  Version   14            Upper    32752 (0x7ff0)
+ LSN:  logid      1 recoff 0xc162f250      Special  32752 (0x7ff0)
+ Items:    0                      Free Space: 32728
+ Checksum: 0x1714  Prune XID: 0x00000000  Flags: 0x0000 ()
+ Length (including item array): 24
+
+<Data> -----
+Word 0:  "80 00 00 00 00 00 00 0e"   Compressed: 1
+Word 1:  "00 00 00 00 00 00 1f ff"   Compressed: 0
+Word 2:  "00 00 00 00 00 00 03 f1"   Compressed: 1
+
+<Special Section> -----
+ Bitmap Index Section:
+  Num of used words: 3 
+  Tid of last bit: 65536 
+  Next bitmap page: 4294967295 
+
+
+Block    3 ********************************************************
+<Header> -----
+ Block Offset: 0x00018000         Offsets: Lower      24 (0x0018)
+ Block: Size 32768  Version   14            Upper    32752 (0x7ff0)
+ LSN:  logid      1 recoff 0xc1654928      Special  32752 (0x7ff0)
+ Items:    0                      Free Space: 32728
+ Checksum: 0x62a2  Prune XID: 0x00000000  Flags: 0x0000 ()
+ Length (including item array): 24
+
+<Data> -----
+Word 0:  "00 00 00 00 00 00 04 01"   Compressed: 1
+Word 1:  "ff ff ff ff f8 00 00 00"   Compressed: 0
+Word 2:  "80 00 00 00 00 00 00 0c"   Compressed: 1
+Word 3:  "00 00 00 00 00 00 1f ff"   Compressed: 0
+Word 4:  "00 00 00 00 00 00 03 f1"   Compressed: 1
+
+<Special Section> -----
+ Bitmap Index Section:
+  Num of used words: 5 
+  Tid of last bit: 131072 
+  Next bitmap page: 4294967295 
+
+
+*** End of File Encountered. Last Block Read: 3 ***
 -- create table <name> (c1 int, c2 text)
 \! pg_filedump test/heap.gp6
 
