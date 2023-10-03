@@ -50,6 +50,14 @@ ifeq ($(PG_CONFIG_MAJOR_VERSION),12)
 	REGRESS += gpdb-7_12-control
 endif # PG_CONFIG_MAJOR_VERSION
 
+ifeq ($(PG_CONFIG_MAJOR_VERSION),12.12)
+	# gpdb-7, postgres-12 based
+	GPDB_RELEASE = 7
+	GPDB_COMMIT = 0a7a3566873325aca1789ae6f818c80f17a9402d
+	# pg_control has incompatible formats between gpdb major versions
+	REGRESS += gpdb-7_12.12-control
+endif # PG_CONFIG_MAJOR_VERSION
+
 ifeq ($(GPDB_COMMIT),)
 $(error unsupported gpdb version: $(shell pg_config --version))
 endif # GPDB_COMMIT
