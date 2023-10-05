@@ -186,32 +186,20 @@ OBJS += $(LINKSRCS:.c=.o)
 OBJS += gpdb.o
 OBJS += mock.o
 
-# heap has incompatible flags between gpdb 4 and later major versions
-ifeq ($(GPDB_RELEASE),4)
-	REGRESS += gpdb-4-common
-else # GPDB_RELEASE
-	REGRESS += gpdb-5-common
-	REGRESS += gpdb-6-common
-	REGRESS += gpdb-7-common
-endif # GPDB_RELEASE
+REGRESS += gpdb-$(GPDB_RELEASE)-common
 
 ifeq ($(ENABLE_ZLIB),y)
-	REGRESS += gpdb-4-zlib
-	REGRESS += gpdb-5-zlib
-	REGRESS += gpdb-6-zlib
-	REGRESS += gpdb-7-zlib
+	REGRESS += gpdb-$(GPDB_RELEASE)-zlib
 endif # ENABLE_ZLIB
 
 ifeq ($(ENABLE_ZSTD),y)
-	REGRESS += gpdb-6-zstd
-	REGRESS += gpdb-7-zstd
+ifeq ($(filter $(GPDB_RELEASE),6 7),)
+	REGRESS += gpdb-$(GPDB_RELEASE)-zstd
+endif
 endif # ENABLE_ZSTD
 
 ifeq ($(ENABLE_QUICKLZ),y)
-	REGRESS += gpdb-4-quicklz
-	REGRESS += gpdb-5-quicklz
-	REGRESS += gpdb-6-quicklz
-	REGRESS += gpdb-7-quicklz
+	REGRESS += gpdb-$(GPDB_RELEASE)-quicklz
 endif # ENABLE_QUICKLZ
 
 ifdef USE_PGXS
